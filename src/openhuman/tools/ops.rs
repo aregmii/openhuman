@@ -261,6 +261,30 @@ pub fn all_tools_with_runtime(
         tracing::debug!("[seltz] disabled — set SELTZ_API_KEY to enable");
     }
 
+    // SearXNG: self-hosted search, gated on `searxng.enabled` and a non-None `base_url`.
+    // Loopback/private addresses are intentionally allowed (SearXNG is commonly run on
+    // localhost or a LAN host). See the SSRF policy note in searxng_search.rs.
+    if root_config.searxng.enabled {
+        if let Some(base_url) = root_config.searxng.base_url.as_deref() {
+            tools.push(Box::new(SearxngSearchTool::new(
+                base_url.to_string(),
+                root_config.searxng.max_results,
+                root_config.searxng.default_language.clone(),
+                root_config.searxng.default_categories.clone(),
+                root_config.searxng.timeout_secs,
+            )));
+            tracing::debug!("[searxng_search] registered searxng_search_tool");
+        } else {
+            tracing::debug!(
+                "[searxng_search] disabled (searxng.enabled is true but base_url is not set)"
+            );
+        }
+    } else {
+        tracing::debug!(
+            "[searxng_search] disabled (set tools.searxng.enabled = true and base_url to enable)"
+        );
+    }
+
     // Managed Node.js exec tools — gated on `root_config.node.enabled`.
     // Both share the same `NodeBootstrap` as ShellTool so the download +
     // extract + install pipeline runs at most once per session.

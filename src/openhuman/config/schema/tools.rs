@@ -290,6 +290,63 @@ impl Default for WebSearchConfig {
     }
 }
 
+/// SearXNG self-hosted search integration.
+///
+/// Disabled by default: requires the operator to run a SearXNG instance.
+/// Set `enabled = true` and `base_url` to opt in.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(default)]
+pub struct SearxngConfig {
+    /// Master toggle. Off by default: opt-in only (requires self-hosted infrastructure).
+    #[serde(default)]
+    pub enabled: bool,
+    /// Base URL of the SearXNG instance, e.g. "http://localhost:8080".
+    /// Required when enabled: if None the tool is not registered even when enabled is true.
+    #[serde(default)]
+    pub base_url: Option<String>,
+    /// Maximum results to return per query (1-50).
+    #[serde(default = "default_searxng_max_results")]
+    pub max_results: usize,
+    /// Default language code, e.g. "en" or "de".
+    #[serde(default = "default_searxng_language")]
+    pub default_language: String,
+    /// Default categories string passed to SearXNG.
+    #[serde(default = "default_searxng_categories")]
+    pub default_categories: String,
+    /// Per-request timeout in seconds.
+    #[serde(default = "default_searxng_timeout_secs")]
+    pub timeout_secs: u64,
+}
+
+fn default_searxng_max_results() -> usize {
+    10
+}
+
+fn default_searxng_language() -> String {
+    "en".into()
+}
+
+fn default_searxng_categories() -> String {
+    "general".into()
+}
+
+fn default_searxng_timeout_secs() -> u64 {
+    10
+}
+
+impl Default for SearxngConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            base_url: None,
+            max_results: default_searxng_max_results(),
+            default_language: default_searxng_language(),
+            default_categories: default_searxng_categories(),
+            timeout_secs: default_searxng_timeout_secs(),
+        }
+    }
+}
+
 /// Composio integration routing mode for the main backend-proxied flow.
 ///
 /// `"backend"` (default) — every Composio call (toolkits, connections,

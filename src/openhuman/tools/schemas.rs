@@ -19,6 +19,7 @@ pub fn all_controller_schemas() -> Vec<ControllerSchema> {
         tools_schemas("tools_composio_execute"),
         tools_schemas("tools_web_search"),
         tools_schemas("tools_seltz_search"),
+        tools_schemas("tools_searxng_search"),
         tools_schemas("tools_apify_linkedin_scrape"),
     ]
 }
@@ -36,6 +37,10 @@ pub fn all_registered_controllers() -> Vec<RegisteredController> {
         RegisteredController {
             schema: tools_schemas("tools_seltz_search"),
             handler: handle_seltz_search,
+        },
+        RegisteredController {
+            schema: tools_schemas("tools_searxng_search"),
+            handler: handle_searxng_search,
         },
         RegisteredController {
             schema: tools_schemas("tools_apify_linkedin_scrape"),
@@ -186,6 +191,45 @@ pub fn tools_schemas(function: &str) -> ControllerSchema {
                 name: "documents",
                 ty: TypeSchema::Array(Box::new(TypeSchema::Json)),
                 comment: "Each item: {url, content, title?, published_date?}.",
+                required: true,
+            }],
+        },
+        "tools_searxng_search" => ControllerSchema {
+            namespace: "tools",
+            function: "searxng_search",
+            description: "Web search via a self-hosted SearXNG instance. Returns structured \
+                          results with titles, URLs, and snippets. Requires searxng.enabled \
+                          and base_url in config.",
+            inputs: vec![
+                FieldSchema {
+                    name: "query",
+                    ty: TypeSchema::String,
+                    comment: "Search query string.",
+                    required: true,
+                },
+                FieldSchema {
+                    name: "categories",
+                    ty: TypeSchema::Option(Box::new(TypeSchema::String)),
+                    comment: "Comma-separated categories: general, news, images, videos, science, social_media, files.",
+                    required: false,
+                },
+                FieldSchema {
+                    name: "language",
+                    ty: TypeSchema::Option(Box::new(TypeSchema::String)),
+                    comment: "Language code, e.g. \"en\". Defaults to config value.",
+                    required: false,
+                },
+                FieldSchema {
+                    name: "max_results",
+                    ty: TypeSchema::Option(Box::new(TypeSchema::U64)),
+                    comment: "Max results (1-50, default from config).",
+                    required: false,
+                },
+            ],
+            outputs: vec![FieldSchema {
+                name: "results",
+                ty: TypeSchema::Array(Box::new(TypeSchema::Json)),
+                comment: "Each item: {url, title?, content?, engine?, publishedDate?, score?}.",
                 required: true,
             }],
         },
@@ -432,6 +476,73 @@ fn handle_seltz_search(params: Map<String, Value>) -> ControllerFuture {
     })
 }
 
+fn handle_searxng_search(params: Map<String, Value>) -> ControllerFuture {
+    Box::pin(async move {
+        let query = params
+            .get("query")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string)
+            .ok_or_else(|| "missing or empty `query`".to_string())?;
+
+        let config = config_rpc::load_config_with_timeout().await?;
+
+        if !config.searxng.enabled {
+            tracing::debug!("[rpc][tools.searxng_search] disabled, rejecting");
+            return Err(
+                "SearXNG search is not enabled. Set tools.searxng.enabled = true and base_url in config.".to_string(),
+            );
+        }
+
+        let base_url = config.searxng.base_url.as_deref().ok_or_else(|| {
+            "SearXNG base_url is not configured. Set tools.searxng.base_url.".to_string()
+        })?;
+
+        let max_results = params
+            .get("max_results")
+            .and_then(Value::as_u64)
+            .map(|n| n.clamp(1, 50) as usize)
+            .unwrap_or(config.searxng.max_results);
+
+        tracing::debug!(
+            query_len = query.chars().count(),
+            max_results,
+            "[rpc][tools.searxng_search] start"
+        );
+
+        let tool = crate::openhuman::tools::SearxngSearchTool::new(
+            base_url.to_string(),
+            max_results,
+            config.searxng.default_language.clone(),
+            config.searxng.default_categories.clone(),
+            config.searxng.timeout_secs,
+        );
+
+        let mut args = json!({ "query": query, "max_results": max_results });
+        let args_map = args.as_object_mut().unwrap();
+        if let Some(v) = params.get("categories") {
+            args_map.insert("categories".to_string(), v.clone());
+        }
+        if let Some(v) = params.get("language") {
+            args_map.insert("language".to_string(), v.clone());
+        }
+
+        let result = tool
+            .execute(args)
+            .await
+            .map_err(|e| format!("searxng search failed: {e:#}"))?;
+
+        let payload = json!({ "results": result.output() });
+        let log = vec![format!(
+            "[rpc][tools.searxng_search] success query_len={} max_results={}",
+            query.chars().count(),
+            max_results
+        )];
+        RpcOutcome::new(payload, log).into_cli_compatible_json()
+    })
+}
+
 fn handle_apify_linkedin_scrape(params: Map<String, Value>) -> ControllerFuture {
     Box::pin(async move {
         let profile_url = params
@@ -473,13 +584,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn all_schemas_returns_four() {
-        assert_eq!(all_controller_schemas().len(), 4);
+    fn all_schemas_returns_five() {
+        assert_eq!(all_controller_schemas().len(), 5);
     }
 
     #[test]
-    fn all_controllers_returns_four() {
-        assert_eq!(all_registered_controllers().len(), 4);
+    fn all_controllers_returns_five() {
+        assert_eq!(all_registered_controllers().len(), 5);
     }
 
     #[test]

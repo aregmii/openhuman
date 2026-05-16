@@ -34,6 +34,10 @@ const TOOL_ID_TO_RUST_NAMES: &[(&str, &[&str])] = &[
     // `update_check` is read-only; `update_apply` is gated by both the
     // tool-level autonomy check and `config.update.rpc_mutations_enabled`.
     ("update", &["update_check", "update_apply"]),
+    // SearXNG self-hosted search (issue #1842). Gated by config at
+    // registration time; also filterable here so users can opt out
+    // per-session from the tool-toggle surface.
+    ("searxng_search", &["searxng_search_tool"]),
 ];
 
 /// All Rust tool names that are filterable (union of all mapping values).
